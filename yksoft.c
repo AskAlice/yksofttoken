@@ -50,6 +50,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #ifdef __linux__
 #  include <sys/random.h>
@@ -117,7 +118,7 @@ int persistent_file_write(int token_dir_fd, char const *token_dir, char const *p
 	char		private_id_hex[(sizeof(in->tok.uid) * 2) + 1];
 	char		aes_key_hex[(sizeof(in->aes_key) * 2) + 1];
 
-	fpos_t		pos;
+	long		pos;
 
 	umask(S_IRWXG | S_IRWXO);
 
@@ -163,13 +164,9 @@ do { \
 	WRITE(PONRAND_FIELD ": %u", in->ponrand);
 	DEBUG("");
 
-	fgetpos(persist, &pos);
+	pos = ftell(persist);
 
-#ifdef __linux__
-	if (ftruncate(fileno(persist), pos.__pos) < 0) {
-#else
 	if (ftruncate(fileno(persist), pos) < 0) {
-#endif
 		ERROR("Failed truncating persistence file \"%s/%s\": %s", token_dir, path, strerror(errno));
 		goto error;
 	}

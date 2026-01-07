@@ -56,27 +56,18 @@ jobs:
 
       - name: Find and prepare binary
         run: |
-          echo "=== Full directory listing ==="
-          find . -name "fyne-cross" -type d -exec find {} -type f \; 2>/dev/null || true
-          echo "=== Looking for yksoft binary ==="
-          find . -name "yksoft*" -type f 2>/dev/null || true
-          echo "=== Preparing dist ==="
+          echo "=== Looking for binary ==="
+          find fyne-cross -type f -name "${{ env.APP_NAME }}*" 2>/dev/null || true
           mkdir -p dist
           # Try multiple possible locations
-          for dir in "fyne-cross/bin/linux-${{ matrix.arch }}" "fyne-cross/dist/linux-${{ matrix.arch }}" "fyne-cross/bin" "fyne-cross/dist"; do
+          for dir in "fyne-cross/bin/linux-${{ matrix.arch }}" "fyne-cross/dist/linux-${{ matrix.arch }}"; do
             if [ -f "${dir}/${{ env.APP_NAME }}" ]; then
               echo "Found binary at ${dir}/${{ env.APP_NAME }}"
               cp "${dir}/${{ env.APP_NAME }}" dist/
               break
             fi
           done
-          # Fallback: find any yksoft binary
-          if [ ! -f "dist/${{ env.APP_NAME }}" ]; then
-            echo "Trying fallback search..."
-            find . -path ./legacy -prune -o -name "${{ env.APP_NAME }}" -type f -print -quit | head -1 | xargs -I {} cp {} dist/ 2>/dev/null || true
-          fi
-          echo "=== dist contents ==="
-          ls -la dist/ || echo "dist is empty"
+          ls -la dist/
           test -f "dist/${{ env.APP_NAME }}" || (echo "ERROR: Binary not found!" && exit 1)
 
       - name: Upload Linux artifact
@@ -119,7 +110,6 @@ jobs:
       - name: Prepare artifact
         run: |
           mkdir -p dist
-          echo "=== Looking for .app bundles ==="
           find . -maxdepth 1 -name "*.app" -type d
           mv *.app dist/ 2>/dev/null || true
           ls -la dist/
@@ -155,27 +145,17 @@ jobs:
 
       - name: Find and prepare binary
         run: |
-          echo "=== Full directory listing ==="
-          find . -name "fyne-cross" -type d -exec find {} -type f \; 2>/dev/null || true
-          echo "=== Looking for exe files ==="
-          find . -name "*.exe" -type f 2>/dev/null || true
-          echo "=== Preparing dist ==="
+          echo "=== Looking for exe ==="
+          find fyne-cross -type f -name "*.exe" 2>/dev/null || true
           mkdir -p dist
-          # Try multiple possible locations
-          for dir in "fyne-cross/bin/windows-${{ matrix.arch }}" "fyne-cross/dist/windows-${{ matrix.arch }}" "fyne-cross/bin" "fyne-cross/dist"; do
+          for dir in "fyne-cross/bin/windows-${{ matrix.arch }}" "fyne-cross/dist/windows-${{ matrix.arch }}"; do
             if [ -f "${dir}/${{ env.APP_NAME }}.exe" ]; then
               echo "Found exe at ${dir}/${{ env.APP_NAME }}.exe"
               cp "${dir}/${{ env.APP_NAME }}.exe" dist/
               break
             fi
           done
-          # Fallback: find any exe
-          if [ ! -f "dist/${{ env.APP_NAME }}.exe" ]; then
-            echo "Trying fallback search..."
-            find . -name "${{ env.APP_NAME }}.exe" -type f -print -quit | head -1 | xargs -I {} cp {} dist/ 2>/dev/null || true
-          fi
-          echo "=== dist contents ==="
-          ls -la dist/ || echo "dist is empty"
+          ls -la dist/
           test -f "dist/${{ env.APP_NAME }}.exe" || (echo "ERROR: Exe not found!" && exit 1)
 
       - name: Upload Windows artifact
@@ -198,8 +178,15 @@ jobs:
           name: ${{ env.APP_NAME }}-windows-amd64
           path: nsis
 
-      - name: List downloaded files
-        run: dir nsis\
+      - name: Rename binary for NSIS
+        run: |
+          dir nsis\
+          if exist "nsis\${{ env.APP_NAME }}.exe" (
+            echo "Binary found"
+          ) else (
+            echo "Looking for binary..."
+            dir nsis\ /s
+          )
         shell: cmd
 
       - name: Install NSIS
@@ -233,19 +220,20 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-linux-${{ matrix.arch }}
-          path: dist
+          path: artifact
 
       - name: List downloaded files
         run: |
-          echo "=== Downloaded files ==="
-          ls -la dist/
+          echo "=== Artifact contents ==="
+          ls -laR artifact/
+          echo "=== Finding binary ==="
+          find artifact -type f
 
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y dpkg-dev fakeroot
 
       - name: Build Debian package
         run: |
-          # Create package structure
           VERSION=$(grep -oP 'Version = "\K[^"]+' FyneApp.toml || echo "1.0.0")
           PKG_NAME="${{ env.APP_NAME }}_${VERSION}_${{ matrix.arch }}"
           mkdir -p pkg/${PKG_NAME}/DEBIAN
@@ -253,8 +241,14 @@ jobs:
           mkdir -p pkg/${PKG_NAME}/usr/share/applications
           mkdir -p pkg/${PKG_NAME}/usr/share/icons/hicolor/256x256/apps
           
-          # Copy binary
-          cp dist/${{ env.APP_NAME }} pkg/${PKG_NAME}/usr/bin/
+          # Find and copy binary (handle both flat and nested structures)
+          BINARY=$(find artifact -type f -name "${{ env.APP_NAME }}" | head -1)
+          if [ -z "$BINARY" ]; then
+            # Maybe it's the only file
+            BINARY=$(find artifact -type f | head -1)
+          fi
+          echo "Using binary: $BINARY"
+          cp "$BINARY" pkg/${PKG_NAME}/usr/bin/${{ env.APP_NAME }}
           chmod 755 pkg/${PKG_NAME}/usr/bin/${{ env.APP_NAME }}
           
           # Create control file
@@ -289,6 +283,7 @@ jobs:
           # Build package
           dpkg-deb --build pkg/${PKG_NAME}
           mv pkg/${PKG_NAME}.deb .
+          ls -la *.deb
 
       - name: Upload Debian package
         uses: actions/upload-artifact@v4
@@ -315,7 +310,7 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p release
-          ls -la artifacts/
+          ls -laR artifacts/
           
           # Linux
           for arch in amd64 arm64; do

@@ -3,14 +3,19 @@ Maintainer: Arran Cudbard-Bell <a.cudbardb@freeradius.org>
 Standards-Version: 4.5.0
 Priority: optional
 Build-Depends:
- libyubikey-dev,
+ golang-go (>= 1.21),
+ debhelper-compat (= 12),
 Section: utils
 
 Package: yksofttoken
 Architecture: any
 Depends:
- libyubikey0,
+ ${shlibs:Depends},
+ ${misc:Depends},
 Description: Yubikey hardware token emulator
  Produces HOTP One Time Passcodes in Yubikey format, roughly
- following the behaviour of a hardware Yubikey.  Useful for
+ following the behaviour of a hardware Yubikey. Useful for
  establishing M2M connections for VPNs which require 2FA.
+ .
+ This is a graphical application built with Fyne toolkit that
+ provides a modern UI for managing software Yubikey tokens.

@@ -1,3 +1,12 @@
+yksofttoken (1.0.0-1) stable; urgency=low
+
+   * Complete rewrite in Go with Fyne GUI toolkit
+   * Cross-platform support for Windows, macOS, and Linux
+   * Modern graphical user interface
+   * Same token format compatible with original C version
+
+ -- Arran Cudbard-Bell <a.cudbardb@freeradius.org>  Wed, 07 Jan 2026 00:00:00 +0000
+
 yksofttoken (0.0.4-1) focal; urgency=low
 
    * Remove unecessary dependency on the arc4random functions under Linux.

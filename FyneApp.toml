@@ -1,0 +1,8 @@
+[Details]
+Icon = "assets/icon.png"
+Name = "YKSoft Token"
+ID = "org.freeradius.yksoft"
+Version = "1.0.0"
+Build = 1
+
+[Release]

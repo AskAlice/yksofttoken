@@ -1,6 +1,7 @@
 # yksoft
 
 [![CI build status][BuildStatus]][BuildStatusLink]
+[![Cross-Platform Build][CrossBuildStatus]][CrossBuildLink]
 
 ## Introduction
 
@@ -13,216 +14,202 @@ Sometimes it's useful to emulate a physical Yubikey token in software, examples 
   their employees, and want to issue each of them a hardware token to connect into
   their VPN service.
 
-Yubico provides the `ykgenerate` utility which emulates most of a hardware based
-Yubikey's HOTP functionality.  Unfortunately `ykgenerate` doesn't persist counter
-information, track time between OTP code generation, and many other small bits and
-pieces that are needed to properly emulate a hardware token.
-
 **NOTE**
 
 yksoft is not intended to be a replacement for a Yubikey in situations that require
 high security, this utility is not as secure as a physical Yubikey.
 
-## Building
+## Features
 
-yksoft has a single 3rd party dependency which is `libyubikey`.
+- **Cross-Platform**: Runs on Windows, macOS (Intel & Apple Silicon), and Linux (x86_64 & ARM64)
+- **Modern GUI**: Built with [Fyne](https://fyne.io/) toolkit for a native look and feel
+- **Token Management**: Create, manage, and delete multiple software tokens
+- **Clipboard Support**: One-click copy of OTPs and registration information
+- **Persistent Storage**: Token data is stored securely in `~/.yksoft/`
+- **Compatible**: Generates OTPs compatible with standard Yubikey validators
 
-### macos
+## Screenshots
+
+The application provides a clean, modern interface for managing software Yubikey tokens.
+
+## Installation
+
+### Pre-built Binaries
+
+Download the latest release for your platform from the [Releases](https://github.com/arr2036/yksofttoken/releases) page.
+
+#### Windows
+- Download `YKSoftToken-Setup.exe` for the installer
+- Or download `yksoft-windows-amd64.zip` / `yksoft-windows-arm64.zip` for portable version
+
+#### macOS
+Using Homebrew (recommended):
+```bash
+brew install --cask yksoft
+```
+
+Or download the ZIP file for your architecture:
+- Intel Mac: `yksoft-darwin-amd64.zip`
+- Apple Silicon: `yksoft-darwin-arm64.zip`
+
+#### Linux
+Debian/Ubuntu:
+```bash
+sudo dpkg -i yksofttoken_1.0.0_amd64.deb
+# or for ARM64
+sudo dpkg -i yksofttoken_1.0.0_arm64.deb
+```
+
+Or download the tarball for your architecture.
+
+### Building from Source
+
+#### Prerequisites
+- Go 1.21 or later
+- Fyne dependencies (see [Fyne Getting Started](https://developer.fyne.io/started/))
+
+#### Build
 
 ```bash
-brew install libyubikey
-make
+# Clone the repository
+git clone https://github.com/arr2036/yksofttoken.git
+cd yksofttoken
+
+# Build
+go build -o yksoft .
+
+# Run
+./yksoft
 ```
 
-### Debian/Ubuntu
+#### Cross-Compilation with fyne-cross
 
 ```bash
-sudo apt-get install libyubikey-dev
-make
+# Install fyne-cross
+go install github.com/fyne-io/fyne-cross@latest
+
+# Build for all platforms
+fyne-cross linux -arch amd64,arm64
+fyne-cross darwin -arch amd64,arm64
+fyne-cross windows -arch amd64,arm64
 ```
 
-### RHEL/Rocky etc...
+## Usage
+
+### GUI Application
+
+1. Launch the application
+2. Click "New" to create a new token
+3. The registration information (public ID, private ID, AES key) will be displayed
+4. Register these values with your authentication server
+5. Click "Generate OTP" to create a one-time password
+6. Click "Copy" to copy the OTP to clipboard
+
+### Token Storage
+
+Token data is stored in `~/.yksoft/` (or `%USERPROFILE%\.yksoft\` on Windows).
+
+Each token is stored as a plaintext file with the following format:
+```
+public_id: <modhex>
+private_id: <hex>
+aes_key: <hex>
+counter: <number>
+session: <number>
+created: <timestamp>
+lastuse: <timestamp>
+ponrand: <number>
+```
+
+**Security Note**: The token files are not encrypted. Ensure appropriate file permissions
+are set (the application creates files with mode 0600).
+
+## Registration
+
+When you create a new token or click "Copy Registration Info", you'll get a CSV string:
+```
+<public_id_modhex>, <private_id_hex>, <aes_key_hex>
+```
+
+Use these values to register the token with your authentication server:
+- **Public ID (modhex)**: The identifier prepended to each OTP
+- **Private ID (hex)**: The secret identifier validated by the server
+- **AES Key (hex)**: The encryption key (16 bytes / 32 hex characters)
+
+## Technical Details
+
+### OTP Format
+
+Each OTP consists of:
+- 12 modhex characters: Public ID
+- 32 modhex characters: Encrypted token block
+
+Total: 44 characters
+
+### Encrypted Token Block Contents
+
+| Field     | Size    | Description                    |
+|-----------|---------|--------------------------------|
+| uid       | 6 bytes | Private ID                     |
+| counter   | 2 bytes | Usage counter                  |
+| timestamp | 3 bytes | 8Hz timer value                |
+| session   | 1 byte  | Session use counter            |
+| random    | 2 bytes | Random value                   |
+| crc       | 2 bytes | CRC16 checksum                 |
+
+### Time Simulation
+
+A hardware Yubikey has an 8Hz timer. This software emulates it using:
+```
+timestamp = ((current_time - created_time) * 8 + ponrand) % 0xFFFFFF
+```
+
+## Development
+
+### Project Structure
+
+```
+.
+├── main.go              # Main application entry point
+├── internal/
+│   ├── yubikey/         # Yubikey encoding/crypto functions
+│   └── token/           # Token management
+├── assets/              # Application icons
+├── nsis/                # Windows installer script
+├── homebrew/            # macOS Homebrew cask
+├── debian/              # Debian packaging
+└── .github/workflows/   # CI/CD pipelines
+```
+
+### Running Tests
 
 ```bash
-yum install libyubikey-devel
-make
+go test ./...
 ```
 
-## First use
+### CI/CD
 
-yksoft by default will search in `~/.yksoft` for a token persistence file `default`.
-If this file is not found, a new public id, private id, and AES key is generated and
-written to `~/.yksoft/default` along with various timestamps and counters.
+The project uses GitHub Actions for:
+- Building binaries for all platforms using `fyne-cross`
+- Creating Windows NSIS installers
+- Building Debian packages
+- Creating GitHub releases
 
-The token persistence file is not encrypted in any way, and you should ensure that
-permissions on it are set correctly, i.e. NOT world readable/writable.  yksoft will
-refuse to run with incorrect permissions.
+## License
 
-When the token persistence file is created, data needed to register the soft token
-with an authentication server is written to stdout and no OTP is produced.
+BSD 2-Clause License. See [LICENSE](LICENSE) for details.
 
-```bash
-> yksoft
-ddddjkdcungg, 10a0352b62fb, 622708a469ece555bd1fc3ee20c3222a
-```
+## Credits
 
-Subsequent calls (where the token persistence file exists) will write an OTP to
-stdout.
+- Original C implementation by Arran Cudbard-Bell
+- Go port using [Fyne](https://fyne.io/) GUI toolkit
+- Yubikey protocol compatible with [libyubikey](https://github.com/Yubico/yubico-c)
 
-```bash
-> yksoft
-ddddjkdcunggjfnkgjedvntebkukhejnbffchurkgruc
-```
+## Contributing
 
-If you need to see the registration information again, either cat the persistence file
-(it's there as plaintext), or pass the `-r` flag.
-
-## Arguments
-
-See the output of `yksoft -h`, currently:
-
-```text
-usage: ./yksoft [options] [<token file>]
-
-  -C <counter_cmd>        Run a persistence command when a new token is generated, or when the 'use' counter increments.
-
-  -c <counter>            Counter for initialisation (0-32766).  Will always be incremented by one on first use.  Defaults to 0.
-
-  -I <public_id>          Public ID as MODHEX to use for initialisation (max 6 bytes i.e. 12 modhexits).  Defaults to dddd<4 byte random>.
-                          If the Public ID is < 6 bytes, the remaining bytes will be randomised.
-
-  -i <private_id>         Private ID as HEX to use for initialisation (6 bytes i.e. 12 hexits).  Defaults to <6 byte random>.
-
-  -k <key>                AES key as HEX to use for initialisation (16 bytes i.e. 32 hexits).  Defaults to <16 byte random>.
-
-  -d                      Turns on debug logging to stderr.
-
-  -f                      Specify the directory tokens are stored in.  Defaults to "~/.yksoft"
-
-  -r                      Prints out registration information to stdout. An OTP will not be generated.
-
-  -R                      Regenerate the specified token.
-
-  -h                      This help text.
-
-Emulate a hardware yubikey token in HOTP mode.
-```
-
-## How do I...
-### Emulate an existing physical token
-
-If the public identity, private identity, AES key, and counter of an existing token
-are known they can be passed in via `-I <modhex>`, `-i <hex>`, `-k <hex>` and
-`-c <uint>` respectively.
-
-These values will be written to the persitence file instead of random values being used.
-
-The value passed in via `-c` is always incremented by 1, to "reset" the session count.
-
-### Generate a public ID from a prefix
-
-Where a public identity is specified with `-I`, any identity bytes not provided on the
-command line will be filled with random bytes.  Passing `-I frfr` for example, would
-produce a public identity with a `frfr` prefix e.g. `frfrttuhdgvb`.
-
-### Use multiple tokens
-
-The final parameter passed to yksoft determines the name of the token file used.
-
-```bash
-> yksoft foo
-# Loads token persistence data from ~/.yksoft/foo
-```
-
-The default token directory may be altered with the `-f` argument.
-
-```bash
-> yksoft -f /tmp/ foo
-# Loads persistence data from /tmp/foo
-```
-
-### Restore a token from a backup
-
-Four pieces of information are needed to restore a soft token, the `public_id`,
-`private_id`, `aes_key` and `counter`.
-
-The first three values are static and should be retrieved from a secure password manager
-and passed in via `-I`, `-i` and `-k` respectively.
-
-`counter` will increment every 255 OTPs generated.  When the counter value is incremented
-the new counter value should be recorded off-box.
-
-If the `-C` argument is provided, whenever `counter` increments, or a new token is
-generated, the command specified with `-C` is passed as an argument to `/bin/sh -c`
-(or whichever shell is specified by `$SHELL`).
-
-The contents of the token persistence file is made available as environmental variables.
-For example `${counter}` contains the new `counter` value, and `${public_id}` contains
-the `public_id` of the token.
-
-It's left as an exercise to the user on how to persist this counter to a remote system.
-
-When restoring from a backup the last known counter value should be passed in via `-c`.
-
-## Logging
-
-For robustness when calling yksoft from a VPN client, debugging output goes to stderr,
-only the OTP token and registration information is written to stdout.
-
-Debug logging may be enabled with `-d`.
-
-## VPN clients
-### Openconnect
-
-The easiest way to submit both factors to openconnect is via `--password-on-stdin`.
-In the example below we pipe in the first factor, then the output of yksoft separated
-by the newline from echo.  You could also `cat` the first factor from a file.
-
-```bash
-(echo '<first factor>'; yksoft [<token file>]) | openconnect --user=<user> <url> --passwd-on-stdin
-```
-
-## Technical details
-### Time
-
-A hardware based Yubikey has an 8hz timer that runs whenever the key is powered on.
-This lets the authenticator detect out of order uses of tokens.
-
-In a hardware token, the initial timer value is set to a random value when the token
-is powered on. As yksoft is never "powered off", we pick a new random timer value
-(`ponrand`) whenever the use counter is incremented by one (i.e. when the session
-counter wraps).
-
-We calculate time as `(((time() - created) * 8) + ponrandom) % 0xffffff`,
-where `ponrandom` is 28 bits of randomness, and 4bits of sub-second use counter.
-
-`time()` and friends only have a resolution of seconds, and accessing the high resolution
-functions on various platforms is a pain. To allow multiple token codes to be generated
-in the same second, we reserve one nibble in `ponrandom` and increment that each time yksoft
-is executed, and `lastuse` is equal to `time()`.
-
-When `lastuse` is no longer equal to `time()`, the sub-second use counter is reset to 0.
-
-If the sub-second use counter reaches 7, we sleep for one second before generating the OTP.
-
-### Anatomy of a persistence file
-
-The persistence file consists of key/value pairs separated by `: `, terminated by `\n`.
-
-Keypairs
-
-| Name         | Format   | Length  | Description                                                            |
-|--------------|----------|---------|------------------------------------------------------------------------|
-| `public_id`  | modhex   | 12      | Public ID prepended to the OTP.                                        |
-| `private_id` | hex      | 12      | Private ID used to validate the OTP.                                   |
-| `aes_key`    | hex      | 32      | Key used to encrypt the Private ID and other fields.                   |
-| `counter`    | uint15   |         | Usage counter used to track power on events and session counter wraps. |
-| `session`    | uint8    |         | How many OTPs we've generated since `counter` was last incremented.    |
-| `created`    | time_t   |         | Unix timestamp indicating when the token was initialised.              |
-| `lastuse`    | time_t   |         | Unix timestamp indicating when the token was last used.                |
-| `ponrand`    | uint32   |         | Random number chosen the last time `counter` was incremented.          |
-
-If any of these keys are not found in the persistence file, their value will be treated as 0.
+Contributions are welcome! Please open an issue or pull request.
 
 [BuildStatus]: https://github.com/arr2036/yksofttoken/actions/workflows/ci-linux.yml/badge.svg "CI status"
 [BuildStatusLink]: https://github.com/arr2036/yksofttoken/actions/workflows/ci-linux.yml
+[CrossBuildStatus]: https://github.com/arr2036/yksofttoken/actions/workflows/build.yml/badge.svg "Cross-Platform Build"
+[CrossBuildLink]: https://github.com/arr2036/yksofttoken/actions/workflows/build.yml

@@ -52,11 +52,33 @@ jobs:
         run: |
           fyne-cross linux -arch ${{ matrix.arch }} -app-id ${{ env.APP_ID }} -name ${{ env.APP_NAME }}
 
+      - name: List build output
+        run: |
+          echo "=== fyne-cross directory ==="
+          find fyne-cross -type f 2>/dev/null || echo "No fyne-cross dir"
+          echo "=== Looking for binary ==="
+          find . -name "yksoft*" -type f 2>/dev/null || echo "No binary found"
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p dist
+          # Find and copy the binary
+          if [ -f "fyne-cross/bin/linux-${{ matrix.arch }}/${{ env.APP_NAME }}" ]; then
+            cp "fyne-cross/bin/linux-${{ matrix.arch }}/${{ env.APP_NAME }}" dist/
+          elif [ -f "fyne-cross/dist/linux-${{ matrix.arch }}/${{ env.APP_NAME }}" ]; then
+            cp "fyne-cross/dist/linux-${{ matrix.arch }}/${{ env.APP_NAME }}" dist/
+          else
+            # Find any yksoft binary
+            find fyne-cross -name "${{ env.APP_NAME }}" -type f -exec cp {} dist/ \;
+          fi
+          chmod +x dist/${{ env.APP_NAME }} || true
+          ls -la dist/
+
       - name: Upload Linux artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-linux-${{ matrix.arch }}
-          path: fyne-cross/bin/linux-${{ matrix.arch }}/*
+          path: dist/${{ env.APP_NAME }}
 
   build-darwin:
     name: Build macOS (${{ matrix.arch }})
@@ -86,8 +108,8 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 1
         run: |
-          # For arm64, we need to set up cross-compilation if building on Intel
-          if [ "${{ matrix.arch }}" = "arm64" ]; then
+          # For arm64 cross-compilation on Intel Mac
+          if [ "${{ matrix.arch }}" = "arm64" ] && [ "$(uname -m)" = "x86_64" ]; then
             export CGO_CFLAGS="-arch arm64"
             export CGO_LDFLAGS="-arch arm64"
           fi
@@ -96,20 +118,16 @@ jobs:
       - name: Prepare artifact
         run: |
           mkdir -p dist
-          if [ -d "YKSoft Token.app" ]; then
-            mv "YKSoft Token.app" dist/${{ env.APP_NAME }}.app
-          elif [ -d "${{ env.APP_NAME }}.app" ]; then
-            mv "${{ env.APP_NAME }}.app" dist/
-          else
-            mv *.app dist/ 2>/dev/null || true
-          fi
+          # Find the .app bundle
+          find . -maxdepth 1 -name "*.app" -type d
+          mv *.app dist/ 2>/dev/null || true
           ls -la dist/
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-darwin-${{ matrix.arch }}
-          path: dist/*
+          path: dist/*.app
 
   build-windows:
     name: Build Windows (${{ matrix.arch }})
@@ -133,11 +151,29 @@ jobs:
         run: |
           fyne-cross windows -arch ${{ matrix.arch }} -app-id ${{ env.APP_ID }} -name ${{ env.APP_NAME }}
 
+      - name: List build output
+        run: |
+          echo "=== fyne-cross directory ==="
+          find fyne-cross -type f 2>/dev/null || echo "No fyne-cross dir"
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p dist
+          # Find and copy the exe
+          if [ -f "fyne-cross/bin/windows-${{ matrix.arch }}/${{ env.APP_NAME }}.exe" ]; then
+            cp "fyne-cross/bin/windows-${{ matrix.arch }}/${{ env.APP_NAME }}.exe" dist/
+          elif [ -f "fyne-cross/dist/windows-${{ matrix.arch }}/${{ env.APP_NAME }}.exe" ]; then
+            cp "fyne-cross/dist/windows-${{ matrix.arch }}/${{ env.APP_NAME }}.exe" dist/
+          else
+            find fyne-cross -name "*.exe" -type f -exec cp {} dist/ \;
+          fi
+          ls -la dist/
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.APP_NAME }}-windows-${{ matrix.arch }}
-          path: fyne-cross/bin/windows-${{ matrix.arch }}/*
+          path: dist/*.exe
 
   build-windows-installer:
     name: Build Windows NSIS Installer
@@ -152,11 +188,10 @@ jobs:
           name: ${{ env.APP_NAME }}-windows-amd64
           path: dist/windows-amd64
 
-      - name: Download Windows arm64 artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.APP_NAME }}-windows-arm64
-          path: dist/windows-arm64
+      - name: List downloaded files
+        run: |
+          dir dist\windows-amd64\
+        shell: cmd
 
       - name: Install NSIS
         run: choco install nsis -y
@@ -165,7 +200,8 @@ jobs:
         run: |
           copy dist\windows-amd64\yksoft.exe nsis\yksoft.exe
           cd nsis
-          makensis installer.nsi
+          & "$env:ProgramFiles(x86)\NSIS\makensis.exe" installer.nsi
+        shell: pwsh
 
       - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
@@ -189,6 +225,12 @@ jobs:
           name: ${{ env.APP_NAME }}-linux-${{ matrix.arch }}
           path: dist/linux-${{ matrix.arch }}
 
+      - name: List downloaded files
+        run: |
+          echo "=== Downloaded files ==="
+          find dist -type f
+          ls -la dist/linux-${{ matrix.arch }}/
+
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y dpkg-dev fakeroot
 
@@ -202,9 +244,14 @@ jobs:
           mkdir -p pkg/${PKG_NAME}/usr/share/applications
           mkdir -p pkg/${PKG_NAME}/usr/share/icons/hicolor/256x256/apps
           
-          # Copy binary
-          cp dist/linux-${{ matrix.arch }}/yksoft pkg/${PKG_NAME}/usr/bin/
-          chmod 755 pkg/${PKG_NAME}/usr/bin/yksoft
+          # Copy binary - handle both possible names
+          if [ -f "dist/linux-${{ matrix.arch }}/${{ env.APP_NAME }}" ]; then
+            cp "dist/linux-${{ matrix.arch }}/${{ env.APP_NAME }}" pkg/${PKG_NAME}/usr/bin/
+          else
+            # Find any executable
+            find dist/linux-${{ matrix.arch }} -type f -executable -exec cp {} pkg/${PKG_NAME}/usr/bin/${{ env.APP_NAME }} \;
+          fi
+          chmod 755 pkg/${PKG_NAME}/usr/bin/${{ env.APP_NAME }}
           
           # Create control file
           cat > pkg/${PKG_NAME}/DEBIAN/control << EOF
@@ -231,6 +278,9 @@ jobs:
           Categories=Utility;Security;
           Terminal=false
           EOF
+          
+          # Copy icon
+          cp assets/icon.png pkg/${PKG_NAME}/usr/share/icons/hicolor/256x256/apps/yksoft.png || true
           
           # Build package
           dpkg-deb --build pkg/${PKG_NAME}

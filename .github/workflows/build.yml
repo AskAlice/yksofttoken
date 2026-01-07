@@ -155,9 +155,11 @@ jobs:
           echo "=== Looking for exe ==="
           find fyne-cross -type f -name "*.exe" 2>/dev/null || true
           mkdir -p dist
-          # The exe is named after the module (yksofttoken.exe)
-          if [ -f "fyne-cross/bin/windows-${{ matrix.arch }}/${{ env.BINARY_NAME }}.exe" ]; then
-            cp "fyne-cross/bin/windows-${{ matrix.arch }}/${{ env.BINARY_NAME }}.exe" dist/${{ env.APP_NAME }}.exe
+          # Windows uses app name from FyneApp.toml which may have spaces
+          EXE=$(find fyne-cross/bin/windows-${{ matrix.arch }} -name "*.exe" -type f | head -1)
+          if [ -n "$EXE" ]; then
+            echo "Found: $EXE"
+            cp "$EXE" dist/${{ env.APP_NAME }}.exe
           fi
           ls -la dist/
           test -f "dist/${{ env.APP_NAME }}.exe" || (echo "ERROR: Exe not found!" && exit 1)

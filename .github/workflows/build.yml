@@ -30,6 +30,8 @@ on:
 env:
   APP_NAME: yksoft
   APP_ID: org.freeradius.yksoft
+  # fyne-cross uses module name for binary
+  BINARY_NAME: yksofttoken
 
 jobs:
   build-linux:
@@ -52,21 +54,17 @@ jobs:
 
       - name: Build for Linux ${{ matrix.arch }}
         run: |
-          fyne-cross linux -arch ${{ matrix.arch }} -app-id ${{ env.APP_ID }} -name ${{ env.APP_NAME }} -debug
+          fyne-cross linux -arch ${{ matrix.arch }} -app-id ${{ env.APP_ID }}
 
       - name: Find and prepare binary
         run: |
           echo "=== Looking for binary ==="
-          find fyne-cross -type f -name "${{ env.APP_NAME }}*" 2>/dev/null || true
+          find fyne-cross -type f 2>/dev/null || true
           mkdir -p dist
-          # Try multiple possible locations
-          for dir in "fyne-cross/bin/linux-${{ matrix.arch }}" "fyne-cross/dist/linux-${{ matrix.arch }}"; do
-            if [ -f "${dir}/${{ env.APP_NAME }}" ]; then
-              echo "Found binary at ${dir}/${{ env.APP_NAME }}"
-              cp "${dir}/${{ env.APP_NAME }}" dist/
-              break
-            fi
-          done
+          # The binary is named after the module (yksofttoken)
+          if [ -f "fyne-cross/bin/linux-${{ matrix.arch }}/${{ env.BINARY_NAME }}" ]; then
+            cp "fyne-cross/bin/linux-${{ matrix.arch }}/${{ env.BINARY_NAME }}" dist/${{ env.APP_NAME }}
+          fi
           ls -la dist/
           test -f "dist/${{ env.APP_NAME }}" || (echo "ERROR: Binary not found!" && exit 1)
 
@@ -105,13 +103,22 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: 1
         run: |
-          fyne package -os darwin -name "${{ env.APP_NAME }}" -appID "${{ env.APP_ID }}"
+          fyne package -os darwin -appID "${{ env.APP_ID }}"
 
       - name: Prepare artifact
         run: |
           mkdir -p dist
+          echo "=== Looking for .app bundles ==="
           find . -maxdepth 1 -name "*.app" -type d
           mv *.app dist/ 2>/dev/null || true
+          # Rename to consistent name
+          cd dist
+          for app in *.app; do
+            if [ "$app" != "${{ env.APP_NAME }}.app" ] && [ -d "$app" ]; then
+              mv "$app" "${{ env.APP_NAME }}.app"
+            fi
+          done
+          cd ..
           ls -la dist/
 
       - name: Upload macOS artifact
@@ -141,20 +148,17 @@ jobs:
 
       - name: Build for Windows ${{ matrix.arch }}
         run: |
-          fyne-cross windows -arch ${{ matrix.arch }} -app-id ${{ env.APP_ID }} -name ${{ env.APP_NAME }} -debug
+          fyne-cross windows -arch ${{ matrix.arch }} -app-id ${{ env.APP_ID }}
 
       - name: Find and prepare binary
         run: |
           echo "=== Looking for exe ==="
           find fyne-cross -type f -name "*.exe" 2>/dev/null || true
           mkdir -p dist
-          for dir in "fyne-cross/bin/windows-${{ matrix.arch }}" "fyne-cross/dist/windows-${{ matrix.arch }}"; do
-            if [ -f "${dir}/${{ env.APP_NAME }}.exe" ]; then
-              echo "Found exe at ${dir}/${{ env.APP_NAME }}.exe"
-              cp "${dir}/${{ env.APP_NAME }}.exe" dist/
-              break
-            fi
-          done
+          # The exe is named after the module (yksofttoken.exe)
+          if [ -f "fyne-cross/bin/windows-${{ matrix.arch }}/${{ env.BINARY_NAME }}.exe" ]; then
+            cp "fyne-cross/bin/windows-${{ matrix.arch }}/${{ env.BINARY_NAME }}.exe" dist/${{ env.APP_NAME }}.exe
+          fi
           ls -la dist/
           test -f "dist/${{ env.APP_NAME }}.exe" || (echo "ERROR: Exe not found!" && exit 1)
 
@@ -178,15 +182,9 @@ jobs:
           name: ${{ env.APP_NAME }}-windows-amd64
           path: nsis
 
-      - name: Rename binary for NSIS
+      - name: List downloaded files
         run: |
           dir nsis\
-          if exist "nsis\${{ env.APP_NAME }}.exe" (
-            echo "Binary found"
-          ) else (
-            echo "Looking for binary..."
-            dir nsis\ /s
-          )
         shell: cmd
 
       - name: Install NSIS
@@ -226,8 +224,6 @@ jobs:
         run: |
           echo "=== Artifact contents ==="
           ls -laR artifact/
-          echo "=== Finding binary ==="
-          find artifact -type f
 
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y dpkg-dev fakeroot
@@ -241,12 +237,8 @@ jobs:
           mkdir -p pkg/${PKG_NAME}/usr/share/applications
           mkdir -p pkg/${PKG_NAME}/usr/share/icons/hicolor/256x256/apps
           
-          # Find and copy binary (handle both flat and nested structures)
-          BINARY=$(find artifact -type f -name "${{ env.APP_NAME }}" | head -1)
-          if [ -z "$BINARY" ]; then
-            # Maybe it's the only file
-            BINARY=$(find artifact -type f | head -1)
-          fi
+          # Find and copy binary
+          BINARY=$(find artifact -type f | head -1)
           echo "Using binary: $BINARY"
           cp "$BINARY" pkg/${PKG_NAME}/usr/bin/${{ env.APP_NAME }}
           chmod 755 pkg/${PKG_NAME}/usr/bin/${{ env.APP_NAME }}

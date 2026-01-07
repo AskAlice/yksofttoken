@@ -3,11 +3,12 @@
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "EnvVarUpdate.nsh"
 
 ; General settings
 Name "YKSoft Token"
 OutFile "YKSoftToken-Setup.exe"
-InstallDir "$PROGRAMFILES64\YKSoft Token"
+InstallDir "$PROGRAMFILES\yksoft"
 InstallDirRegKey HKLM "Software\YKSoft Token" "InstallDir"
 RequestExecutionLevel admin
 
@@ -19,7 +20,7 @@ RequestExecutionLevel admin
 VIProductVersion "${VERSION}.0"
 VIAddVersionKey "ProductName" "YKSoft Token"
 VIAddVersionKey "CompanyName" "${PUBLISHER}"
-VIAddVersionKey "LegalCopyright" "Copyright (c) 2022-2024 ${PUBLISHER}"
+VIAddVersionKey "LegalCopyright" "Copyright (c) 2022-2024 ${PUBLISHER}, modifications (c) 2026 Alice Knag"
 VIAddVersionKey "FileDescription" "Yubikey Software Token Emulator"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
@@ -100,10 +101,16 @@ Section "Install" SecInstall
     
     ; Save install dir
     WriteRegStr HKLM "Software\YKSoft Token" "InstallDir" "$INSTDIR"
+    
+    ; Add to PATH
+    ${EnvVarUpdate} $0 "PATH" "A" "HKLM" "$INSTDIR"
 SectionEnd
 
 ; Uninstaller section
 Section "Uninstall"
+    ; Remove from PATH
+    ${un.EnvVarUpdate} $0 "PATH" "R" "HKLM" "$INSTDIR"
+    
     ; Remove files
     Delete "$INSTDIR\yksoft.exe"
     Delete "$INSTDIR\Uninstall.exe"

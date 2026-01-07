@@ -1,0 +1,286 @@
+name: Cross-Platform Build
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    tags:
+      - 'v*'
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'FyneApp.toml'
+      - '.github/workflows/build.yml'
+  pull_request:
+    branches:
+      - master
+      - main
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'FyneApp.toml'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+env:
+  APP_NAME: yksoft
+  APP_ID: org.freeradius.yksoft
+
+jobs:
+  build-linux:
+    name: Build Linux (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install fyne-cross
+        run: go install github.com/fyne-io/fyne-cross@latest
+
+      - name: Build for Linux ${{ matrix.arch }}
+        run: |
+          fyne-cross linux -arch ${{ matrix.arch }} -app-id ${{ env.APP_ID }} ./cmd/yksoft
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-linux-${{ matrix.arch }}
+          path: fyne-cross/bin/linux-${{ matrix.arch }}/*
+
+  build-darwin:
+    name: Build macOS (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install fyne-cross
+        run: go install github.com/fyne-io/fyne-cross@latest
+
+      - name: Build for macOS ${{ matrix.arch }}
+        run: |
+          fyne-cross darwin -arch ${{ matrix.arch }} -app-id ${{ env.APP_ID }} ./cmd/yksoft
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-darwin-${{ matrix.arch }}
+          path: fyne-cross/bin/darwin-${{ matrix.arch }}/*
+
+  build-windows:
+    name: Build Windows (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install fyne-cross
+        run: go install github.com/fyne-io/fyne-cross@latest
+
+      - name: Build for Windows ${{ matrix.arch }}
+        run: |
+          fyne-cross windows -arch ${{ matrix.arch }} -app-id ${{ env.APP_ID }} ./cmd/yksoft
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-windows-${{ matrix.arch }}
+          path: fyne-cross/bin/windows-${{ matrix.arch }}/*
+
+  build-windows-installer:
+    name: Build Windows NSIS Installer
+    needs: build-windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows amd64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-windows-amd64
+          path: dist/windows-amd64
+
+      - name: Download Windows arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-windows-arm64
+          path: dist/windows-arm64
+
+      - name: Install NSIS
+        run: choco install nsis -y
+
+      - name: Create NSIS installer
+        run: |
+          copy dist\windows-amd64\yksoft.exe nsis\yksoft.exe
+          cd nsis
+          makensis installer.nsi
+
+      - name: Upload NSIS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-windows-installer
+          path: nsis/*.exe
+
+  build-deb:
+    name: Build Debian Package
+    needs: build-linux
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-linux-${{ matrix.arch }}
+          path: dist/linux-${{ matrix.arch }}
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev fakeroot
+
+      - name: Build Debian package
+        run: |
+          # Create package structure
+          VERSION=$(grep -oP 'Version = "\K[^"]+' FyneApp.toml || echo "1.0.0")
+          PKG_NAME="${{ env.APP_NAME }}_${VERSION}_${{ matrix.arch }}"
+          mkdir -p pkg/${PKG_NAME}/DEBIAN
+          mkdir -p pkg/${PKG_NAME}/usr/bin
+          mkdir -p pkg/${PKG_NAME}/usr/share/applications
+          mkdir -p pkg/${PKG_NAME}/usr/share/icons/hicolor/256x256/apps
+          
+          # Copy binary
+          cp dist/linux-${{ matrix.arch }}/yksoft pkg/${PKG_NAME}/usr/bin/
+          chmod 755 pkg/${PKG_NAME}/usr/bin/yksoft
+          
+          # Create control file
+          cat > pkg/${PKG_NAME}/DEBIAN/control << EOF
+          Package: yksofttoken
+          Version: ${VERSION}
+          Section: utils
+          Priority: optional
+          Architecture: ${{ matrix.arch }}
+          Maintainer: Arran Cudbard-Bell <a.cudbardb@freeradius.org>
+          Description: Yubikey hardware token emulator
+           Produces HOTP One Time Passcodes in Yubikey format, roughly
+           following the behaviour of a hardware Yubikey. Useful for
+           establishing M2M connections for VPNs which require 2FA.
+          EOF
+          
+          # Create desktop entry
+          cat > pkg/${PKG_NAME}/usr/share/applications/yksoft.desktop << EOF
+          [Desktop Entry]
+          Type=Application
+          Name=YKSoft Token
+          Comment=Yubikey software token emulator
+          Exec=yksoft
+          Icon=yksoft
+          Categories=Utility;Security;
+          Terminal=false
+          EOF
+          
+          # Build package
+          dpkg-deb --build pkg/${PKG_NAME}
+          mv pkg/${PKG_NAME}.deb .
+
+      - name: Upload Debian package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-deb-${{ matrix.arch }}
+          path: "*.deb"
+
+  release:
+    name: Create Release
+    needs: [build-linux, build-darwin, build-windows, build-windows-installer, build-deb]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+          
+          # Linux
+          for arch in amd64 arm64; do
+            if [ -d "artifacts/${{ env.APP_NAME }}-linux-${arch}" ]; then
+              cd artifacts/${{ env.APP_NAME }}-linux-${arch}
+              tar -czvf ../../release/${{ env.APP_NAME }}-linux-${arch}.tar.gz *
+              cd ../..
+            fi
+          done
+          
+          # macOS
+          for arch in amd64 arm64; do
+            if [ -d "artifacts/${{ env.APP_NAME }}-darwin-${arch}" ]; then
+              cd artifacts/${{ env.APP_NAME }}-darwin-${arch}
+              zip -r ../../release/${{ env.APP_NAME }}-darwin-${arch}.zip *
+              cd ../..
+            fi
+          done
+          
+          # Windows
+          for arch in amd64 arm64; do
+            if [ -d "artifacts/${{ env.APP_NAME }}-windows-${arch}" ]; then
+              cd artifacts/${{ env.APP_NAME }}-windows-${arch}
+              zip -r ../../release/${{ env.APP_NAME }}-windows-${arch}.zip *
+              cd ../..
+            fi
+          done
+          
+          # Windows installer
+          if [ -d "artifacts/${{ env.APP_NAME }}-windows-installer" ]; then
+            cp artifacts/${{ env.APP_NAME }}-windows-installer/*.exe release/
+          fi
+          
+          # Debian packages
+          for arch in amd64 arm64; do
+            if [ -d "artifacts/${{ env.APP_NAME }}-deb-${arch}" ]; then
+              cp artifacts/${{ env.APP_NAME }}-deb-${arch}/*.deb release/
+            fi
+          done
+          
+          ls -la release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true

@@ -1,7 +1,50 @@
+# Binaries
 yksoft
-*dSYM
+yksoft.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build directories
+/fyne-cross/
+/dist/
+/build/
+/release/
+
+# Go build artifacts
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS specific
 .DS_Store
-not_a_physical_token
-example
+Thumbs.db
+
+# Debian packaging artifacts
+debian/tmp/
+debian/*.debhelper*
+debian/*.substvars
 debian/files
-debian/tmp
+*.deb
+*.buildinfo
+*.changes
+
+# NSIS output
+nsis/*.exe
+
+# Token files (don't commit real tokens!)
+.yksoft/
+
+# Test coverage
+coverage.txt
+coverage.html
+
+# Vendor (if using vendoring)
+/vendor/

@@ -7,24 +7,10 @@ on:
       - main
     tags:
       - 'v*'
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - 'FyneApp.toml'
-      - 'assets/**'
-      - '.github/workflows/build.yml'
   pull_request:
     branches:
       - master
       - main
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - 'FyneApp.toml'
-      - 'assets/**'
-      - '.github/workflows/build.yml'
   workflow_dispatch:
 
 env:
@@ -290,11 +276,30 @@ jobs:
     name: Create Release
     needs: [build-linux, build-darwin, build-windows, build-windows-installer, build-deb]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Run on push to main/master (not PRs) or on tags
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep -oP 'Version = "\K[^"]+' FyneApp.toml || echo "1.0.0")
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          # For tagged releases, use the tag
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG="${{ github.ref_name }}"
+          else
+            # For branch pushes, create a dev tag with short SHA
+            SHORT_SHA=$(git rev-parse --short HEAD)
+            TAG="v${VERSION}-dev-${SHORT_SHA}"
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Version: ${VERSION}, Tag: ${TAG}"
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -306,16 +311,17 @@ jobs:
           mkdir -p release
           ls -laR artifacts/
           
-          # Linux
+          # Linux binaries
           for arch in amd64 arm64; do
             if [ -d "artifacts/${{ env.APP_NAME }}-linux-${arch}" ]; then
               cd artifacts/${{ env.APP_NAME }}-linux-${arch}
+              chmod +x * 2>/dev/null || true
               tar -czvf ../../release/${{ env.APP_NAME }}-linux-${arch}.tar.gz *
               cd ../..
             fi
           done
           
-          # macOS
+          # macOS apps
           for arch in amd64 arm64; do
             if [ -d "artifacts/${{ env.APP_NAME }}-darwin-${arch}" ]; then
               cd artifacts/${{ env.APP_NAME }}-darwin-${arch}
@@ -324,7 +330,7 @@ jobs:
             fi
           done
           
-          # Windows
+          # Windows binaries
           for arch in amd64 arm64; do
             if [ -d "artifacts/${{ env.APP_NAME }}-windows-${arch}" ]; then
               cd artifacts/${{ env.APP_NAME }}-windows-${arch}
@@ -345,12 +351,38 @@ jobs:
             fi
           done
           
+          echo "=== Release files ==="
           ls -la release/
 
-      - name: Create Release
+      - name: Create or update release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: YKSoft Token ${{ steps.version.outputs.tag }}
+          body: |
+            ## YKSoft Token Release
+            
+            ### Downloads
+            
+            | Platform | Architecture | Download |
+            |----------|--------------|----------|
+            | Windows | x64 | `yksoft-windows-amd64.zip` or `YKSoftToken-Setup.exe` |
+            | Windows | ARM64 | `yksoft-windows-arm64.zip` |
+            | macOS | Intel | `yksoft-darwin-amd64.zip` |
+            | macOS | Apple Silicon | `yksoft-darwin-arm64.zip` |
+            | Linux | x64 | `yksoft-linux-amd64.tar.gz` or `.deb` |
+            | Linux | ARM64 | `yksoft-linux-arm64.tar.gz` or `.deb` |
+            
+            ### Installation
+            
+            **Windows:** Run `YKSoftToken-Setup.exe` or extract the ZIP and run `yksoft.exe`
+            
+            **macOS:** Extract the ZIP and move the `.app` to Applications
+            
+            **Linux (Debian/Ubuntu):** `sudo dpkg -i yksoft_*.deb`
+            
+            **Linux (Other):** Extract the tarball and run `./yksoft`
           files: release/*
           draft: false
-          prerelease: false
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
           generate_release_notes: true

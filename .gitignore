@@ -5,6 +5,10 @@ yksoft.exe
 *.dll
 *.so
 *.dylib
+*.app
+
+# Tools (generated icon tool)
+tools/
 
 # Build directories
 /fyne-cross/

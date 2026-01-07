@@ -8,7 +8,7 @@
 ; General settings
 Name "YKSoft Token"
 OutFile "YKSoftToken-Setup.exe"
-InstallDir "$PROGRAMFILES\yksoft"
+InstallDir "$PROGRAMFILES64\yksoft"
 InstallDirRegKey HKLM "Software\YKSoft Token" "InstallDir"
 RequestExecutionLevel admin
 

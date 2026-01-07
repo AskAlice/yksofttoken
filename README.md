@@ -76,7 +76,7 @@ git clone https://github.com/arr2036/yksofttoken.git
 cd yksofttoken
 
 # Build
-go build -o yksoft ./cmd/yksoft
+go build -o yksoft .
 
 # Run
 ./yksoft
@@ -89,9 +89,9 @@ go build -o yksoft ./cmd/yksoft
 go install github.com/fyne-io/fyne-cross@latest
 
 # Build for all platforms
-fyne-cross linux -arch amd64,arm64 ./cmd/yksoft
-fyne-cross darwin -arch amd64,arm64 ./cmd/yksoft
-fyne-cross windows -arch amd64,arm64 ./cmd/yksoft
+fyne-cross linux -arch amd64,arm64
+fyne-cross darwin -arch amd64,arm64
+fyne-cross windows -arch amd64,arm64
 ```
 
 ## Usage
@@ -170,7 +170,7 @@ timestamp = ((current_time - created_time) * 8 + ponrand) % 0xFFFFFF
 
 ```
 .
-├── cmd/yksoft/          # Main application
+├── main.go              # Main application entry point
 ├── internal/
 │   ├── yubikey/         # Yubikey encoding/crypto functions
 │   └── token/           # Token management

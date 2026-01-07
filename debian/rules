@@ -15,7 +15,7 @@ build: build-arch
 binary: binary-arch
 
 build-arch:
-	go build -o yksoft ./cmd/yksoft
+	go build -o yksoft .
 
 binary-arch:
 	rm -rf debian/tmp

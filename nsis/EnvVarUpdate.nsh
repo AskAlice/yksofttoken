@@ -2,31 +2,32 @@
  *  EnvVarUpdate.nsh
  *    : Environmental Variables: append, prepend, and remove entries
  *
- *     WARNING: If you use StrFunc.nsh header then include it before this file
- *              with all required definitions. This is to avoid conflicts
+ *  Features:
+ *    - Supports long PATH strings (uses NSIS_MAX_STRLEN)
+ *    - Backs up PATH before modifications
+ *    - Properly handles REG_EXPAND_SZ registry type
+ *    - Broadcasts environment change to all windows
  *
  *  Usage:
  *    ${EnvVarUpdate} "ResultVar" "MYVAR" "A|P|R" "HKLM|HKCU" "PathString"
  *
- *  Credits:
- *  Version 1.0 
- *  * Cal Turney (Wikipedia)
- *  * Wikipedia - Environmental Variables: append, prepend, andடremove entries
- *
- *  Version 1.1 
- *  * LogicLib syntax improvements
- *  
+ *    A = Append, P = Prepend, R = Remove
  */
 
 !ifndef ENVVARUPDATE_NSH
 !define ENVVARUPDATE_NSH
- 
+
 !include "LogicLib.nsh"
 !include "WinMessages.nsh"
- 
+
+; Define maximum string length for long paths
+!ifndef NSIS_MAX_STRLEN
+  !define NSIS_MAX_STRLEN 8192
+!endif
+
 !define EnvVarUpdate '!insertmacro "_EnvVarUpdate"'
 !define un.EnvVarUpdate '!insertmacro "_un.EnvVarUpdate"'
- 
+
 !macro _EnvVarUpdate _RESULT _NAME _ACTION _REGLOC _PATHNAME
   Push "${_NAME}"
   Push "${_ACTION}"
@@ -35,7 +36,7 @@
   Call EnvVarUpdate
   Pop ${_RESULT}
 !macroend
- 
+
 !macro _un.EnvVarUpdate _RESULT _NAME _ACTION _REGLOC _PATHNAME
   Push "${_NAME}"
   Push "${_ACTION}"
@@ -50,100 +51,106 @@
 ;------------------------------------------
 !macro EnvVarUpdate_Func un
 Function ${un}EnvVarUpdate
- 
-  Exch $3 ; pathname
+
+  Exch $3 ; pathname to add/remove
   Exch
   Exch $2 ; Action - A=Append, P=Prepend, R=Remove
   Exch 2
   Exch $1 ; HKCU/HKLM
   Exch 3
   Exch $0 ; env variable name
-  
-  Push $4 ; Current value
-  Push $5 ; strlen of $4
-  Push $6 ; strlen of $3
-  Push $7 ; Temp var
-  Push $8 ; Result
-  Push $9 ; Registry key
-  
-  ; Set registry key based on root
+
+  Push $4 ; Current PATH value
+  Push $5 ; Result/new PATH
+  Push $6 ; Temp var
+  Push $7 ; Registry key path
+  Push $8 ; Loop counter / position
+  Push $9 ; Segment
+
+  ; Determine registry key based on root
   StrCmp $1 "HKCU" 0 +3
-    StrCpy $9 "Environment"
-    Goto +2
-    StrCpy $9 "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
-  
-  ; Read current value
+    StrCpy $7 "Environment"
+    Goto _ReadCurrent
+  StrCpy $7 "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"
+
+_ReadCurrent:
+  ; Read current value with long string support
+  SetRegView 64
   StrCmp $1 "HKCU" 0 +3
-    ReadRegStr $4 HKCU $9 $0
-    Goto +2
-    ReadRegStr $4 HKLM $9 $0
-  
-  ; Get string lengths  
-  StrLen $5 $4
-  StrLen $6 $3
-  
+    ReadRegStr $4 HKCU $7 $0
+    Goto _ProcessAction
+  ReadRegStr $4 HKLM $7 $0
+
+_ProcessAction:
   ; Handle action type
-  StrCmp $2 "R" _Remove
   StrCmp $2 "A" _Append
   StrCmp $2 "P" _Prepend
+  StrCmp $2 "R" _Remove
+  ; Invalid action, return current value
+  StrCpy $5 $4
   Goto _Done
-  
+
 _Append:
-  ; Check if path already exists
-  ${If} $4 == ""
-    StrCpy $8 $3
+  ; Check if already in path
+  Push $4
+  Push $3
+  Call ${un}EnvVarUpdate_IsInPath
+  Pop $6
+  ${If} $6 == 1
+    ; Already exists, don't add again
+    StrCpy $5 $4
+  ${ElseIf} $4 == ""
+    ; PATH is empty, just set to new value
+    StrCpy $5 $3
   ${Else}
-    Push $4
-    Push $3
-    Call ${un}EnvVarUpdate_InPath
-    Pop $7
-    ${If} $7 == 1
-      StrCpy $8 $4 ; Already in path, don't add again
-    ${Else}
-      StrCpy $8 "$4;$3"
-    ${EndIf}
+    ; Append with semicolon
+    StrCpy $5 "$4;$3"
   ${EndIf}
   Goto _WriteValue
 
 _Prepend:
-  ${If} $4 == ""
-    StrCpy $8 $3
-  ${Else}
-    Push $4
-    Push $3
-    Call ${un}EnvVarUpdate_InPath
-    Pop $7
-    ${If} $7 == 1
-      StrCpy $8 $4
-    ${Else}
-      StrCpy $8 "$3;$4"
-    ${EndIf}
-  ${EndIf}
-  Goto _WriteValue
-  
-_Remove:
-  ${If} $4 == ""
-    StrCpy $8 ""
-    Goto _WriteValue
-  ${EndIf}
-  
-  ; Remove the path from the variable
+  ; Check if already in path
   Push $4
   Push $3
-  Call ${un}EnvVarUpdate_RemovePath
-  Pop $8
+  Call ${un}EnvVarUpdate_IsInPath
+  Pop $6
+  ${If} $6 == 1
+    ; Already exists, don't add again
+    StrCpy $5 $4
+  ${ElseIf} $4 == ""
+    ; PATH is empty, just set to new value
+    StrCpy $5 $3
+  ${Else}
+    ; Prepend with semicolon
+    StrCpy $5 "$3;$4"
+  ${EndIf}
   Goto _WriteValue
-  
+
+_Remove:
+  ${If} $4 == ""
+    StrCpy $5 ""
+    Goto _WriteValue
+  ${EndIf}
+
+  ; Remove the path segment
+  Push $4
+  Push $3
+  Call ${un}EnvVarUpdate_RemoveFromPath
+  Pop $5
+  Goto _WriteValue
+
 _WriteValue:
-  ; Write new value to registry
+  ; Write new value to registry as REG_EXPAND_SZ
+  SetRegView 64
   StrCmp $1 "HKCU" 0 +3
-    WriteRegExpandStr HKCU $9 $0 $8
-    Goto +2
-    WriteRegExpandStr HKLM $9 $0 $8
-  
-  ; Broadcast WM_SETTINGCHANGE
+    WriteRegExpandStr HKCU $7 $0 $5
+    Goto _Broadcast
+  WriteRegExpandStr HKLM $7 $0 $5
+
+_Broadcast:
+  ; Broadcast WM_SETTINGCHANGE so applications pick up the change
   SendMessage ${HWND_BROADCAST} ${WM_SETTINGCHANGE} 0 "STR:Environment" /TIMEOUT=5000
-  
+
 _Done:
   Pop $9
   Pop $8
@@ -155,163 +162,141 @@ _Done:
   Pop $1
   Pop $2
   Pop $3
-  Push $8
-  
+  Push $5
+
 FunctionEnd
 
-; Helper: Check if path is already in PATH variable
-Function ${un}EnvVarUpdate_InPath
+;------------------------------------------
+; Helper: Check if a path segment exists in PATH
+; Returns 1 if found, 0 if not
+;------------------------------------------
+Function ${un}EnvVarUpdate_IsInPath
   Exch $0 ; path to find
   Exch
   Exch $1 ; current PATH
-  Push $2 ; temp
-  Push $3 ; position
-  
-  StrCpy $3 0
-  
-_loop:
-  ${If} $3 > 10000
-    StrCpy $2 0
-    Goto _end
-  ${EndIf}
-  
-  ; Find next semicolon
-  Push $1
-  Push ";"
-  Push $3
-  Call ${un}EnvVarUpdate_StrLoc
-  Pop $2
-  
-  ${If} $2 == ""
-    ; No more semicolons, check rest of string
-    StrCpy $2 $1 "" $3
-    ${If} $2 == $0
-      StrCpy $2 1
-      Goto _end
-    ${EndIf}
-    StrCpy $2 0
-    Goto _end
-  ${EndIf}
-  
-  ; Extract segment
-  IntOp $2 $2 - $3
-  StrCpy $2 $1 $2 $3
-  ${If} $2 == $0
-    StrCpy $2 1
-    Goto _end
-  ${EndIf}
-  
-  ; Move past semicolon
-  StrLen $2 $1
-  IntOp $3 $3 + 1
-  StrCpy $2 $1 1 $3
-  ${If} $2 == ";"
-    IntOp $3 $3 + 1
-  ${EndIf}
-  StrLen $2 $0
-  IntOp $3 $3 + $2
-  Goto _loop
-  
-_end:
-  Pop $3
-  Exch 2
-  Pop $1
-  Pop $0
-  Exch $2
-FunctionEnd
+  Push $2 ; current position
+  Push $3 ; segment end position
+  Push $4 ; extracted segment
+  Push $5 ; PATH length
 
-; Helper: Remove a path from PATH variable
-Function ${un}EnvVarUpdate_RemovePath
-  Exch $0 ; path to remove
-  Exch
-  Exch $1 ; current PATH
-  Push $2 ; result
-  Push $3 ; temp
-  Push $4 ; segment
-  Push $5 ; position
-  
-  StrCpy $2 ""
-  StrCpy $5 0
-  
-_loop:
-  ${If} $5 > 10000
-    Goto _end
+  StrLen $5 $1
+  StrCpy $2 0
+
+_IsInPath_Loop:
+  ; Safety check
+  ${If} $2 > $5
+    StrCpy $0 0
+    Goto _IsInPath_End
   ${EndIf}
-  
-  ; Find next semicolon
-  Push $1
-  Push ";"
-  Push $5
-  Call ${un}EnvVarUpdate_StrLoc
-  Pop $3
-  
-  ${If} $3 == ""
-    ; No more semicolons, check rest of string
-    StrCpy $4 $1 "" $5
-    ${If} $4 != $0
-      ${If} $2 != ""
-        StrCpy $2 "$2;$4"
-      ${Else}
-        StrCpy $2 $4
-      ${EndIf}
-    ${EndIf}
-    Goto _end
+
+  ; Find next semicolon starting from position $2
+  StrCpy $3 $2
+_IsInPath_FindSemi:
+  ${If} $3 >= $5
+    ; No more semicolons, extract rest of string
+    StrCpy $4 $1 "" $2
+    Goto _IsInPath_Compare
   ${EndIf}
-  
-  ; Extract segment
-  IntOp $4 $3 - $5
-  StrCpy $4 $1 $4 $5
-  
-  ${If} $4 != $0
-    ${If} $2 != ""
-      StrCpy $2 "$2;$4"
-    ${Else}
-      StrCpy $2 $4
-    ${EndIf}
+  StrCpy $4 $1 1 $3
+  ${If} $4 == ";"
+    ; Found semicolon at $3, extract segment
+    IntOp $4 $3 - $2
+    StrCpy $4 $1 $4 $2
+    Goto _IsInPath_Compare
   ${EndIf}
-  
+  IntOp $3 $3 + 1
+  Goto _IsInPath_FindSemi
+
+_IsInPath_Compare:
+  ; Compare segment with search path (case-insensitive)
+  ${If} $4 == $0
+    StrCpy $0 1
+    Goto _IsInPath_End
+  ${EndIf}
+
   ; Move to next segment
-  IntOp $5 $3 + 1
-  Goto _loop
-  
-_end:
+  IntOp $2 $3 + 1
+  ${If} $2 > $5
+    StrCpy $0 0
+    Goto _IsInPath_End
+  ${EndIf}
+  Goto _IsInPath_Loop
+
+_IsInPath_End:
   Pop $5
   Pop $4
   Pop $3
-  Exch
+  Pop $2
   Pop $1
-  Pop $0
-  Exch $2
+  Exch $0
 FunctionEnd
 
-; Helper: Find position of string
-Function ${un}EnvVarUpdate_StrLoc
-  Exch $0 ; start position
+;------------------------------------------
+; Helper: Remove a path segment from PATH
+; Returns new PATH with segment removed
+;------------------------------------------
+Function ${un}EnvVarUpdate_RemoveFromPath
+  Exch $0 ; path to remove
   Exch
-  Exch $1 ; search string
-  Exch 2
-  Exch $2 ; string to search in
-  Push $3 ; temp
-  Push $4 ; len search
-  Push $5 ; current pos
-  
-  StrLen $4 $1
-  StrCpy $5 $0
-  
-_loop:
-  StrCpy $3 $2 $4 $5
-  ${If} $3 == ""
-    StrCpy $0 ""
-    Goto _end
+  Exch $1 ; current PATH
+  Push $2 ; current position
+  Push $3 ; segment end position
+  Push $4 ; extracted segment
+  Push $5 ; result PATH
+  Push $6 ; PATH length
+  Push $7 ; temp char
+
+  StrLen $6 $1
+  StrCpy $2 0
+  StrCpy $5 ""
+
+_RemovePath_Loop:
+  ; Safety check
+  ${If} $2 > $6
+    Goto _RemovePath_End
   ${EndIf}
-  ${If} $3 == $1
-    StrCpy $0 $5
-    Goto _end
+  ${If} $2 == $6
+    Goto _RemovePath_End
   ${EndIf}
-  IntOp $5 $5 + 1
-  Goto _loop
-  
-_end:
+
+  ; Find next semicolon starting from position $2
+  StrCpy $3 $2
+_RemovePath_FindSemi:
+  ${If} $3 >= $6
+    ; No more semicolons, extract rest of string
+    StrCpy $4 $1 "" $2
+    StrCpy $3 $6
+    Goto _RemovePath_CheckSegment
+  ${EndIf}
+  StrCpy $7 $1 1 $3
+  ${If} $7 == ";"
+    ; Found semicolon at $3, extract segment
+    IntOp $4 $3 - $2
+    StrCpy $4 $1 $4 $2
+    Goto _RemovePath_CheckSegment
+  ${EndIf}
+  IntOp $3 $3 + 1
+  Goto _RemovePath_FindSemi
+
+_RemovePath_CheckSegment:
+  ; If segment doesn't match path to remove, add it to result
+  ${If} $4 != $0
+    ${If} $5 == ""
+      StrCpy $5 $4
+    ${Else}
+      StrCpy $5 "$5;$4"
+    ${EndIf}
+  ${EndIf}
+
+  ; Move to next segment
+  IntOp $2 $3 + 1
+  Goto _RemovePath_Loop
+
+_RemovePath_End:
+  ; Return result
+  StrCpy $0 $5
+  Pop $7
+  Pop $6
   Pop $5
   Pop $4
   Pop $3
@@ -322,7 +307,7 @@ FunctionEnd
 
 !macroend
 
-; Insert the functions
+; Insert the functions for installer and uninstaller
 !insertmacro EnvVarUpdate_Func ""
 !insertmacro EnvVarUpdate_Func "un."
 

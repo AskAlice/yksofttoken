@@ -102,12 +102,23 @@ Section "Install" SecInstall
     ; Save install dir
     WriteRegStr HKLM "Software\YKSoft Token" "InstallDir" "$INSTDIR"
     
-    ; Add to PATH
+    ; Enable long paths in Windows (requires Windows 10 1607+)
+    WriteRegDWORD HKLM "SYSTEM\CurrentControlSet\Control\FileSystem" "LongPathsEnabled" 1
+    
+    ; Backup current system PATH before modification
+    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
+    WriteRegStr HKLM "Software\YKSoft Token" "PathBackup" "$1"
+    
+    ; Add to system PATH
     ${EnvVarUpdate} $0 "PATH" "A" "HKLM" "$INSTDIR"
 SectionEnd
 
 ; Uninstaller section
 Section "Uninstall"
+    ; Backup current system PATH before modification
+    ReadRegStr $1 HKLM "SYSTEM\CurrentControlSet\Control\Session Manager\Environment" "Path"
+    WriteRegStr HKLM "Software\YKSoft Token" "PathBackupUninstall" "$1"
+    
     ; Remove from PATH
     ${un.EnvVarUpdate} $0 "PATH" "R" "HKLM" "$INSTDIR"
     
